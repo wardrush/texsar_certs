@@ -5,65 +5,143 @@ import pandas as pd
 
 BASE = "https://sims.texsar.org"
 
-
+# ------------------------
+# LOGIN FUNCTION
+# ------------------------
 def login(email, password):
     session = requests.Session()
 
-    # 1. Load login page -> extract Laravel token
-    resp = session.get(BASE + "/login")
-    soup = BeautifulSoup(resp.text, "html.parser")
+    # Step 1 — GET login page
+    r = session.get(BASE + "/login", headers={"User-Agent": "Mozilla/5.0"})
+    soup = BeautifulSoup(r.text, "html.parser")
 
     token_input = soup.find("input", {"name": "_token"})
     if not token_input:
-        return None, "Could not find Laravel _token."
+        st.error("Could not find CSRF token (_token) in login page.")
+        st.code(r.text[:500])
+        return None, "CSRF token missing"
 
-    token = token_input["value"]
+    csrf_token = token_input["value"]
 
-    # 2. Send login request
+    # Step 2 — Submit login POST exactly like browser
     payload = {
-        "_token": token,
+        "_token": csrf_token,
         "email": email,
-        "password": password,
+        "password": password
     }
 
-    resp = session.post(BASE + "/login", data=payload)
+    headers = {
+        "Referer": BASE + "/login",
+        "Origin": BASE,
+        "User-Agent": "Mozilla/5.0",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
 
-    # If cookies aren’t set → login failed
+    login_resp = session.post(BASE + "/login", data=payload, headers=headers)
+
+    # Check if login succeeded
     if "laravel_session" not in session.cookies:
         return None, "Login failed — check credentials."
 
     return session, None
 
 
-def fetch_personnel(session, limit):
+# ------------------------
+# FETCH PERSONNEL DATA
+# ------------------------
+def fetch_personnel(session, limit=25):
+    # Full DataTables params (must match browser exactly)
     params = {
         "draw": 1,
+        "columns[0][data]": "preferred_full_name",
+        "columns[0][name]": "",
+        "columns[0][searchable]": "true",
+        "columns[0][orderable]": "true",
+        "columns[0][search][value]": "",
+        "columns[0][search][regex]": "false",
+
+        "columns[1][data]": "team_email",
+        "columns[1][name]": "",
+        "columns[1][searchable]": "true",
+        "columns[1][orderable]": "true",
+        "columns[1][search][value]": "",
+        "columns[1][search][regex]": "false",
+
+        "columns[2][data]": "division",
+        "columns[2][name]": "divisions.name",
+        "columns[2][searchable]": "true",
+        "columns[2][orderable]": "true",
+        "columns[2][search][value]": "",
+        "columns[2][search][regex]": "false",
+
+        "columns[3][data]": "certs",
+        "columns[3][name]": "",
+        "columns[3][searchable]": "false",
+        "columns[3][orderable]": "true",
+        "columns[3][search][value]": "",
+        "columns[3][search][regex]": "false",
+
+        "columns[4][data]": "status",
+        "columns[4][name]": "",
+        "columns[4][searchable]": "true",
+        "columns[4][orderable]": "true",
+        "columns[4][search][value]": "",
+        "columns[4][search][regex]": "false",
+
+        "columns[5][data]": "actions",
+        "columns[5][name]": "",
+        "columns[5][searchable]": "true",
+        "columns[5][orderable]": "true",
+        "columns[5][search][value]": "",
+        "columns[5][search][regex]": "false",
+
+        "order[0][column]": 0,
+        "order[0][dir]": "asc",
+        "order[0][name]": "",
+
         "start": 0,
         "length": limit,
-        "division": 0
+        "search[value]": "",
+        "search[regex]": "false",
+        "division": 0,
     }
 
-    resp = session.get(BASE + "/personnel/data", params=params)
-    
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Referer": BASE + "/personnel",
+        "X-Requested-With": "XMLHttpRequest"
+    }
+
+    resp = session.get(BASE + "/personnel/data", params=params, headers=headers)
+
+    # Debug if not JSON
     if resp.status_code != 200:
+        st.error(f"Error fetching personnel data: {resp.status_code}")
+        st.code(resp.text[:500])
         return None
 
-    data = resp.json().get("data", [])
-    return pd.DataFrame(data)
+    try:
+        json_data = resp.json()
+    except Exception:
+        st.error("Response was not JSON. Here's the first part of it:")
+        st.code(resp.text[:500])
+        return None
+
+    return pd.DataFrame(json_data.get("data", []))
 
 
-# ---------------------------
+# ------------------------
 # STREAMLIT UI
-# ---------------------------
-
-st.title("TEXSAR Personnel Data Scraper")
+# ------------------------
+st.title("TEXSAR Personnel Scraper")
 
 email = st.text_input("TEXSAR Email")
 password = st.text_input("TEXSAR Password", type="password")
 
-limit = st.number_input("Number of personnel to pull", min_value=1, max_value=500, value=100)
+limit = st.number_input("Number of entries", min_value=1, max_value=500, value=100)
 
-if st.button("Login & Fetch Data"):
+if st.button("Login & Fetch Personnel"):
     with st.spinner("Logging in..."):
         session, error = login(email, password)
 
@@ -76,15 +154,10 @@ if st.button("Login & Fetch Data"):
             df = fetch_personnel(session, limit)
 
         if df is None or df.empty:
-            st.error("No data returned.")
+            st.error("No data returned. Check logs above.")
         else:
-            st.success("Data loaded!")
+            st.success("Data loaded successfully!")
             st.dataframe(df)
 
             csv = df.to_csv(index=False).encode()
-            st.download_button(
-                "Download CSV",
-                csv,
-                file_name="personnel.csv",
-                mime="text/csv"
-            )
+            st.download_button("Download CSV", csv, "personnel.csv", mime="text/csv")
