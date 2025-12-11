@@ -1,15 +1,6 @@
 [server]
 headless = true
+fileWatcherType = "none"
 
-[logger]
-level = "info"
-
-[global]
-disableWatchdogWarning = true
-
-[runner]
-fastReruns = true
-magicEnabled = false
-
-[server.fileWatcherType]
-watcherType = "none"
+[browser]
+gatherUsageStats = false
