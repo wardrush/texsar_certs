@@ -1,0 +1,15 @@
+[server]
+headless = true
+
+[logger]
+level = "info"
+
+[global]
+disableWatchdogWarning = true
+
+[runner]
+fastReruns = true
+magicEnabled = false
+
+[server.fileWatcherType]
+watcherType = "none"
